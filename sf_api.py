@@ -1,3 +1,4 @@
+from simple_salesforce import SalesforceLogin
 from collections import OrderedDict
 from pathlib import Path
 from selenium import webdriver
@@ -27,7 +28,7 @@ class Login():
         session_id = self._read_session_id()
         r = requests.get(self._endpoint, headers={'Authorization': 'Bearer ' + session_id})
         if r.status_code != 200:
-            session_id = self._get_session_id()
+            session_id = self._get_session_id_using_email()
         return session_id
     
     def _read_session_id(self):
@@ -35,7 +36,13 @@ class Login():
             with open (self._file_session_id, 'r') as file:  
                 session_id = file.readline()
         else:
-            session_id = self._get_session_id()
+            session_id = self._get_session_id_using_email()
+        return session_id
+
+    def _get_session_id_using_email(self):
+        session_id, instance = SalesforceLogin(username='hendry.widyanto@abbott.com.echo', password='Hw8751677!')
+        with open(self._file_session_id, 'w') as file:  
+            file.write(session_id)
         return session_id
       
     def _get_saml_link(self):
