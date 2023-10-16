@@ -108,7 +108,7 @@ async def eumir(start_date_of_event: date | None = None,
     temp_cond = []
     if result_code: temp_cond.append("Evaluation_Result_Code__r.Name IN ('{0}')".format("', '".join(result_code)))
     if conclusion_code: temp_cond.append("Evaluation_Conclusion_Code__r.Name IN ('{0}')".format("', '".join(conclusion_code)))
-    if temp_cond: select_list.append("(SELECT Id FROM Engineering_Codings__r WHERE {0})".format(' AND '.join(temp_cond)))
+    if temp_cond: select_list.append("(SELECT Id FROM Engineering_Codings__r WHERE {0})".format(' OR '.join(temp_cond)))
     
     conditions = []
     if start_date_of_event: conditions.append('Date_of_Event__c > {0}'.format(start_date_of_event))
