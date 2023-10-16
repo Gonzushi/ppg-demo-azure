@@ -7,6 +7,11 @@ from sf_api import API
 import requests
 import pandas as pd
 
+import asyncio
+import aiohttp
+
+from math import ceil
+
 
 app = FastAPI()
 
@@ -53,11 +58,20 @@ fields = {'product_segment': {'object': 'Product_Segment__c',
                       'conditions': []}
          }
 
+@app.on_event('startup')
+async def startup_event():
+    global session
+    session = aiohttp.ClientSession()
+
+@app.on_event('shutdown')
+async def shutdown_event():
+    await session.close()
+
 @app.get('/fields/{field_name}')
 async def field(field_name: str | None = None):
     soql_component = fields[field_name]
     sf = API()
-    data = sf.query_ori(soql_component['object'], soql_component['field'], soql_component['conditions'])
+    data = await sf.query_field(soql_component['object'], soql_component['field'], soql_component['conditions'], session)
     data = data.to_dict('list')
     return data
 
@@ -106,9 +120,8 @@ async def eumir(start_date_of_event: date | None = None,
     soql = soql.replace(' ', '+')
 
     sf = API()
-    api_link = sf.instance + sf.ext['query'] + '?q='
-    data = requests.get(api_link + soql, headers=sf.headers)
-    data = pd.DataFrame(data.json()['records'])
+    data = await sf.query_soql(soql, session)
+    data = pd.DataFrame(data['records'])
     data = data.dropna()
     data = data.to_dict('records')
     return data
