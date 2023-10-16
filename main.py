@@ -67,6 +67,10 @@ async def startup_event():
 async def shutdown_event():
     await session.close()
 
+@app.get('/')
+async def home():
+    return {'message': 'Hello Hendry!'}
+
 @app.get('/fields/{field_name}')
 async def field(field_name: str | None = None):
     soql_component = fields[field_name]
