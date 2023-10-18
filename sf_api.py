@@ -2,6 +2,7 @@ from simple_salesforce import SalesforceLogin
 from math import ceil
 import pandas as pd
 import aiohttp
+import asyncio
 
 class API():
     def __init__(self):
@@ -43,4 +44,21 @@ class API():
     async def query_soql(self, SOQL, session=aiohttp.ClientSession()):
         async with session.get(self.instance + self.query + SOQL, headers=self.headers) as response:
             data_json = await response.json()
-        return data_json
+            
+        data = data_json['records']
+        pages = ceil(data_json['totalSize']/2000)
+        
+        if pages > 1:
+            url = data_json['nextRecordsUrl'][0:-4]
+
+            links = [url + str(page*2000) for page in range(1, pages)]
+
+            async def extra_query(link):
+                async with session.get(self.instance + link, headers=self.headers) as response:
+                    data_json = await response.json()
+                    data.extend(data_json['records'])
+
+            tasks = [extra_query(link) for link in links]
+            await asyncio.gather(*tasks)
+        
+        return data

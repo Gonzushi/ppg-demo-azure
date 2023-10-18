@@ -80,9 +80,9 @@ async def field(field_name: str | None = None):
     return data
 
 @app.get('/eumir/')
-async def eumir(start_date_of_event: date | None = None,
-                end_date_of_event: date | None = None,
-                product_segment: Annotated[list[str] | None, Query()] = None,
+async def eumir(start_date_of_event: date,
+                end_date_of_event: date,
+                product_segment: Annotated[list[str], Query()],
                 rdc_code: Annotated[list[str] | None, Query()] = None,
                 rdc_clarifier: Annotated[list[str] | None, Query()] = None,
                 pc_code: Annotated[list[str] | None, Query()] = None,
@@ -91,6 +91,11 @@ async def eumir(start_date_of_event: date | None = None,
                 country_name: Annotated[list[str] | None, Query()] = None,
                 complaint_code: Annotated[str | None, Query(pattern='CN-\d\d\d\d\d\d$')] = None):
     
+    child_filter_count = 0
+    if rdc_code and rdc_clarifier: child_filter_count += 1
+    if pc_code: child_filter_count += 1
+    if result_code and conclusion_code: child_filter_count += 1
+
     object = 'CMPL123CME__Complaint__c A'
     select_list = ['A.Id', 
                    'A.Name', 
@@ -98,34 +103,38 @@ async def eumir(start_date_of_event: date | None = None,
                    'A.Date_of_Event__c', 
                    'A.Reportable_Country__c']
     
-    temp_cond = []
-    if rdc_code: temp_cond.append("Code__c IN ('{0}')".format("', '".join(rdc_code)))
-    if rdc_clarifier: temp_cond.append("Clarifier__c IN ('{0}')".format("', '".join(rdc_clarifier)))
-    if temp_cond: select_list.append("(SELECT Id FROM RDC_Codes__r WHERE {0})".format(' AND '.join(temp_cond)))
-    
-    if pc_code: select_list.append("(SELECT Id FROM Patient_Codes__r WHERE Code__c IN ('{0}'))".format("', '".join(pc_code)))
-    
-    temp_cond = []
-    if result_code: temp_cond.append("Evaluation_Result_Code__r.Name IN ('{0}')".format("', '".join(result_code)))
-    if conclusion_code: temp_cond.append("Evaluation_Conclusion_Code__r.Name IN ('{0}')".format("', '".join(conclusion_code)))
-    if temp_cond: select_list.append("(SELECT Id FROM Engineering_Codings__r WHERE {0})".format(' AND '.join(temp_cond)))
-    
-    conditions = []
-    if start_date_of_event: conditions.append('Date_of_Event__c > {0}'.format(start_date_of_event))
-    if end_date_of_event: conditions.append('Date_of_Event__c < {0}'.format(end_date_of_event))
-    if product_segment: conditions.append("Product_Segment__c IN ('{0}')".format("', '".join(product_segment)))
-    if country_name: conditions.append("Reportable_Country__c IN ('{0}')".format("', '".join(country_name)))
-    if complaint_code: conditions.append("Name NOT IN ('{0}')".format(complaint_code))
+    if child_filter_count <= 2:
+        conditions = []
+        if start_date_of_event: conditions.append('Date_of_Event__c >= {0}'.format(start_date_of_event))
+        if end_date_of_event: conditions.append('Date_of_Event__c < {0}'.format(end_date_of_event))
+        if product_segment: conditions.append("Product_Segment__c IN ('{0}')".format("', '".join(product_segment)))
+        if country_name: conditions.append("Reportable_Country__c IN ('{0}')".format("', '".join(country_name)))
+        if complaint_code: conditions.append("Name NOT IN ('{0}')".format(complaint_code))
+        if pc_code: conditions.append("Id IN (SELECT Related_Complaint__c FROM Patient_Code__c WHERE Code__c IN ('{0}'))".format("', '".join(pc_code)))
 
-    select_statement = ', '.join(select_list)
-    conditions_statement = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
-    soql = 'SELECT {0} FROM {1} {2}'.format(select_statement, object, conditions_statement)
-    soql = soql.strip()
-    soql = soql.replace(' ', '+')
+        temp_cond = []
+        if rdc_code: temp_cond.append("Code__c IN ('{0}')".format("', '".join(rdc_code)))
+        if rdc_clarifier: temp_cond.append("Clarifier__c IN ('{0}')".format("', '".join(rdc_clarifier)))
+        if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM RDC_Code__c WHERE {0})".format(' AND '.join(temp_cond)))
 
-    sf = API()
-    data = await sf.query_soql(soql, session)
-    data = pd.DataFrame(data['records'])
-    data = data.dropna()
-    data = data.to_dict('records')
+        temp_cond = []
+        if result_code: temp_cond.append("Evaluation_Result_Code__r.Name IN ('{0}')".format("', '".join(result_code)))
+        if conclusion_code: temp_cond.append("Evaluation_Conclusion_Code__r.Name IN ('{0}')".format("', '".join(conclusion_code)))
+        if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM Engineering_Coding__c WHERE {0})".format(' AND '.join(temp_cond)))
+
+        select_statement = ', '.join(select_list)
+        conditions_statement = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
+        soql = 'SELECT {0} FROM {1} {2}'.format(select_statement, object, conditions_statement)
+        soql = soql.strip()
+        print(soql)
+        soql = soql.replace(' ', '+')
+
+        sf = API()
+        data = await sf.query_soql(soql, session)
+        data = pd.DataFrame(data)
+        data = data.dropna()
+        data = data.to_dict('records')
+    else:
+        data = {'message': 'Child record is more than 2'}
+
     return data
