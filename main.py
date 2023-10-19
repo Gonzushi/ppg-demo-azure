@@ -1,17 +1,15 @@
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
-from typing import Annotated
-from pydantic import BaseModel
-from datetime import date
-from sf_api import API
-import requests
+import aiohttp
 import pandas as pd
 
-import asyncio
-import aiohttp
+from datetime import date
+from fastapi import FastAPI, Query, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from typing import Annotated
+from sf_api import API, Login
 
-from math import ceil
-
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 app = FastAPI()
 
@@ -63,21 +61,59 @@ async def startup_event():
     global session
     session = aiohttp.ClientSession()
 
+
 @app.on_event('shutdown')
 async def shutdown_event():
     await session.close()
+
 
 @app.get('/')
 async def home():
     return {'message': 'Hello Hendry!'}
 
+
+@app.post('/token')
+async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    sf = API(username=form_data.username, password=form_data.password)
+    if not sf.login_succesful:
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    display_name = sf.identity()['display_name']
+
+    return {"access_token": sf.session_id, "token_type": "bearer", 'display_name': display_name}
+
+@app.post('/verify_token')
+async def verify_token(token: Annotated[str, Depends(oauth2_scheme)] = None):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Your sessions has timed out. Please log in again.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    sf = Login(session_id=token)
+    if not sf.login_succesful: raise credentials_exception
+    return {'details': 'Session ID is valid'}
+
+async def verify_session_id(session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Your sessions has timed out. Please log in again.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    sf = Login(session_id=session_id)
+    if not sf.login_succesful: raise credentials_exception
+    return session_id
+
+
 @app.get('/fields/{field_name}')
-async def field(field_name: str | None = None):
+async def field(field_name: str | None = None,
+                session_id: Annotated[str, Depends(verify_session_id)] = None):
     soql_component = fields[field_name]
-    sf = API()
+    sf = API(session_id=session_id)
     data = await sf.query_field(soql_component['object'], soql_component['field'], soql_component['conditions'], session)
     data = data.to_dict('list')
     return data
+
 
 @app.get('/eumir/')
 async def eumir(start_date_of_event: date,
@@ -89,7 +125,8 @@ async def eumir(start_date_of_event: date,
                 result_code: Annotated[list[str] | None, Query()] = None,
                 conclusion_code: Annotated[list[str] | None, Query()] = None,
                 country_name: Annotated[list[str] | None, Query()] = None,
-                complaint_code: Annotated[str | None, Query(pattern='CN-\d\d\d\d\d\d$')] = None):
+                complaint_code: Annotated[str | None, Query(pattern='CN-\d\d\d\d\d\d$')] = None,
+                session_id: Annotated[str, Depends(verify_session_id)] = None):
 
     object = 'CMPL123CME__Complaint__c A'
     select_list = ['A.Id', 
@@ -111,42 +148,37 @@ async def eumir(start_date_of_event: date,
 
     if child_filter_count <= 2:
         if pc_code: conditions.append("Id IN (SELECT Related_Complaint__c FROM Patient_Code__c WHERE Code__c IN ('{0}'))".format("', '".join(pc_code)))
-
-        temp_cond = []
-        if rdc_code: temp_cond.append("Code__c IN ('{0}')".format("', '".join(rdc_code)))
-        if rdc_clarifier: temp_cond.append("Clarifier__c IN ('{0}')".format("', '".join(rdc_clarifier)))
-        if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM RDC_Code__c WHERE {0})".format(' AND '.join(temp_cond)))
-
-        temp_cond = []
-        if result_code: temp_cond.append("Evaluation_Result_Code__r.Name IN ('{0}')".format("', '".join(result_code)))
-        if conclusion_code: temp_cond.append("Evaluation_Conclusion_Code__r.Name IN ('{0}')".format("', '".join(conclusion_code)))
-        if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM Engineering_Coding__c WHERE {0})".format(' AND '.join(temp_cond)))
     else:
         if pc_code: select_list.append("(SELECT Related_Complaint__c FROM Patient_Codes__r WHERE Code__c IN ('{0}'))".format("', '".join(pc_code)))
 
-        temp_cond = []
-        if rdc_code: temp_cond.append("Code__c IN ('{0}')".format("', '".join(rdc_code)))
-        if rdc_clarifier: temp_cond.append("Clarifier__c IN ('{0}')".format("', '".join(rdc_clarifier)))
-        if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM RDC_Code__c WHERE {0})".format(' AND '.join(temp_cond)))
+    temp_cond = []
+    if rdc_code: temp_cond.append("Code__c IN ('{0}')".format("', '".join(rdc_code)))
+    if rdc_clarifier: temp_cond.append("Clarifier__c IN ('{0}')".format("', '".join(rdc_clarifier)))
+    if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM RDC_Code__c WHERE {0})".format(' AND '.join(temp_cond)))
 
-        temp_cond = []
-        if result_code: temp_cond.append("Evaluation_Result_Code__r.Name IN ('{0}')".format("', '".join(result_code)))
-        if conclusion_code: temp_cond.append("Evaluation_Conclusion_Code__r.Name IN ('{0}')".format("', '".join(conclusion_code)))
-        if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM Engineering_Coding__c WHERE {0})".format(' AND '.join(temp_cond)))
+    temp_cond = []
+    if result_code: temp_cond.append("Evaluation_Result_Code__r.Name IN ('{0}')".format("', '".join(result_code)))
+    if conclusion_code: temp_cond.append("Evaluation_Conclusion_Code__r.Name IN ('{0}')".format("', '".join(conclusion_code)))
+    if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM Engineering_Coding__c WHERE {0})".format(' AND '.join(temp_cond)))
 
     select_statement = ', '.join(select_list)
     conditions_statement = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
     soql = 'SELECT {0} FROM {1} {2}'.format(select_statement, object, conditions_statement)
     soql = soql.strip()
-    print(soql)
     soql = soql.replace(' ', '+')
 
-    sf = API()
+    sf = API(session_id=session_id)
     data = await sf.query_soql(soql, session)
     data = pd.DataFrame(data)
     data = data.dropna()
-    data.drop(columns="attributes", inplace=True)
-    if child_filter_count > 2: data.drop(columns="Patient_Codes__r", inplace=True)
+    if len(data) > 0:
+        data.drop(columns="attributes", inplace=True)
+        if child_filter_count > 2: data.drop(columns="Patient_Codes__r", inplace=True)
     data = data.to_dict('records')
 
     return data
+
+
+
+
+
