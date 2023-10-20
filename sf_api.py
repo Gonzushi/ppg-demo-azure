@@ -11,17 +11,17 @@ class Login():
         self.api_version = 'v58.0'
         self.instance = 'https://abbottecho.my.salesforce.com'
         self.endpoint = self.instance + f'/services/data/{self.api_version}/'
-        self.session_id = ''
-        self.login_succesful = False
-        if session_id: self._check_session_id(session_id) 
+        self.session_id = session_id
+        self.login_succesful = True
         if not session_id: self._login(username, password)
     
-    def _check_session_id(self, session_id):
-        headers = {'Authorization': 'Bearer ' + session_id}
+    def check_session_id(self):
+        headers = {'Authorization': 'Bearer ' + self.session_id}
         response = requests.get(self.endpoint, headers=headers)
-        if response.status_code == 200:
-            self.session_id = session_id
+        if response.status_code == 200: 
             self.login_succesful = True
+        else:
+            self.login_succesful = False
         
     def _login(self, username, password):
         client_id = 'simple-salesforce'
@@ -52,6 +52,8 @@ class Login():
         if response.status_code == 200: 
             self.login_succesful = True
             self.session_id = self._getUniqueElementValueFromXmlString(response.content, 'sessionId')
+        else:
+            self.login_succesful =False
             
     def _getUniqueElementValueFromXmlString(self, xmlString, elementName):
         """

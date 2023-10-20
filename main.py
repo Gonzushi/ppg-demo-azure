@@ -95,24 +95,14 @@ async def verify_token(token: Annotated[str, Depends(oauth2_scheme)] = None):
     )
 
     sf = Login(session_id=token)
+    sf.check_session_id()
     if not sf.login_succesful: raise credentials_exception
     return {'detail': 'Session ID is valid'}
-
-async def verify_session_id(session_id: Annotated[str, Depends(oauth2_scheme)] = None):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Your sessions has timed out. Please log in again.",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    sf = Login(session_id=session_id)
-    if not sf.login_succesful: raise credentials_exception
-    return session_id
 
 
 @app.get('/fields/{field_name}')
 async def field(field_name: str | None = None,
-                session_id: Annotated[str, Depends(verify_session_id)] = None):
+                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
     soql_component = fields[field_name]
     sf = API(session_id=session_id)
     data = await sf.query_field(soql_component['object'], soql_component['field'], soql_component['conditions'], session)
@@ -131,7 +121,7 @@ async def eumir(start_date_of_event: date,
                 conclusion_code: Annotated[list[str] | None, Query()] = None,
                 country_name: Annotated[list[str] | None, Query()] = None,
                 complaint_code: Annotated[str | None, Query(pattern='CN-\d\d\d\d\d\d$')] = None,
-                session_id: Annotated[str, Depends(verify_session_id)] = None):
+                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
 
     object = 'CMPL123CME__Complaint__c A'
     select_list = ['A.Id', 
