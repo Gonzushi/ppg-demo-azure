@@ -140,4 +140,3 @@ class API(Login):
             await asyncio.gather(*tasks)
         
         return data
-    

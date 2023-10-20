@@ -34,6 +34,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+df = pd.read_excel(r"C:\Users\WIDYAHX\Desktop\Abbott Report\backend\_country_code.xlsx")
+df = df[['Country Code', 'Country Name', 'EEA']].dropna().reset_index(drop=True)
+EEA_country = df['Country Name'].to_list()
+
 fields = {'product_segment': {'object': 'Product_Segment__c',
                               'field': 'Name',
                               'conditions': []},
@@ -111,9 +115,9 @@ async def field(field_name: str | None = None,
 
 
 @app.get('/eumir/')
-async def eumir(start_date_of_event: date,
-                end_date_of_event: date,
-                product_segment: Annotated[list[str], Query()],
+async def eumir(start_date_of_event: date | None = None,
+                end_date_of_event: date| None = None,
+                product_segment: Annotated[list[str] | None, Query()] = None,
                 rdc_code: Annotated[list[str] | None, Query()] = None,
                 rdc_clarifier: Annotated[list[str] | None, Query()] = None,
                 pc_code: Annotated[list[str] | None, Query()] = None,
@@ -128,12 +132,11 @@ async def eumir(start_date_of_event: date,
                    'A.Name', 
                    'A.Product_Segment__c', 
                    'A.Date_of_Event__c', 
-                   'A.Reportable_Country__c']
+                   'A.Reportable_Country__c',]
     conditions = []
     if start_date_of_event: conditions.append('Date_of_Event__c >= {0}'.format(start_date_of_event))
     if end_date_of_event: conditions.append('Date_of_Event__c < {0}'.format(end_date_of_event))
     if product_segment: conditions.append("Product_Segment__c IN ('{0}')".format("', '".join(product_segment)))
-    if country_name: conditions.append("Reportable_Country__c IN ('{0}')".format("', '".join(country_name)))
     if complaint_code: conditions.append("Name NOT IN ('{0}')".format(complaint_code))
 
     child_filter_count = 0
@@ -163,15 +166,31 @@ async def eumir(start_date_of_event: date,
     soql = soql.replace(' ', '+')
 
     sf = API(session_id=session_id)
-    data = await sf.query_soql(soql, session)
-    data = pd.DataFrame(data)
-    data = data.dropna()
-    if len(data) > 0:
-        data.drop(columns="attributes", inplace=True)
-        if child_filter_count > 2: data.drop(columns="Patient_Codes__r", inplace=True)
-    data = data.to_dict('records')
+    raw_data = await sf.query_soql(soql, session)
+    df = pd.DataFrame(raw_data)
+    df = df.dropna()
+    df.reset_index(drop=True, inplace=True)
+    if len(df) > 0:
+        df.drop(columns="attributes", inplace=True)
+        if child_filter_count > 2: df.drop(columns="Patient_Codes__r", inplace=True)
 
-    return data
+    df_summary_table = pd.DataFrame()
+    year_list = sorted(df['Date_of_Event__c'].str[:4].value_counts().index.to_list(), reverse=True)
+    for year in year_list:
+        df_complaint_year = df['Date_of_Event__c'].str[0:4] == year
+        if country_name: df_summary_table.loc['Selected', year] = [country in country_name for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
+        df_summary_table.loc['EEA', year] = [country in EEA_country for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
+        df_summary_table.loc['World', year] = df_complaint_year.value_counts()[True]
+    df_summary_table = df_summary_table.astype(int)
+
+
+    summary_table = df_summary_table.rename_axis('#').reset_index().to_dict('records')
+    summary_per_country = df['Reportable_Country__c']
+    df = df[[country in country_name for country in df['Reportable_Country__c']]].reset_index(drop=True) if country_name else df
+    data = df.to_dict('records')
+    response = {'data': data, 'summary_per_country': summary_per_country, 'summary_table': summary_table}
+
+    return response
 
 
 
