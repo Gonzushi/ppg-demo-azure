@@ -2,8 +2,9 @@ import aiohttp
 import pandas as pd
 
 from datetime import date
-from fastapi import FastAPI, Query, Depends, HTTPException, status
+from fastapi import Cookie, FastAPI, Query, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import Annotated
@@ -79,7 +80,11 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
         raise HTTPException(status_code=400, detail="Incorrect username or password")
     display_name = sf.identity()['display_name']
 
-    return {"access_token": sf.session_id, "token_type": "bearer", 'display_name': display_name}
+    content = {"access_token": sf.session_id, "token_type": "bearer", 'display_name': display_name}
+    response = JSONResponse(content=content)
+    response.set_cookie(key='session_id', value=sf.session_id)
+    response.set_cookie(key='display_name', value=display_name)
+    return response
 
 @app.post('/verify_token')
 async def verify_token(token: Annotated[str, Depends(oauth2_scheme)] = None):
@@ -91,7 +96,7 @@ async def verify_token(token: Annotated[str, Depends(oauth2_scheme)] = None):
 
     sf = Login(session_id=token)
     if not sf.login_succesful: raise credentials_exception
-    return {'details': 'Session ID is valid'}
+    return {'detail': 'Session ID is valid'}
 
 async def verify_session_id(session_id: Annotated[str, Depends(oauth2_scheme)] = None):
     credentials_exception = HTTPException(
