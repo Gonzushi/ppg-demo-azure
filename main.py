@@ -34,7 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-df = pd.read_excel(r"C:\Users\WIDYAHX\Desktop\Abbott Report\backend\_country_code.xlsx")
+df = pd.read_excel("_country_code.xlsx")
 df = df[['Country Code', 'Country Name', 'EEA']].dropna().reset_index(drop=True)
 EEA_country = df['Country Name'].to_list()
 
