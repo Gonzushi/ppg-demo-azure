@@ -61,6 +61,14 @@ fields = {'product_segment': {'object': 'Product_Segment__c',
                       'conditions': []}
          }
 
+cache_field = {'n_product_segment': 0,
+               'n_rdc_code': 0,
+               'n_rdc_clarifier': 0,
+               'n_pc_code': 0,
+               'n_result_code': 0,
+               'n_conclusion_code': 0,
+               'n_country': 0}
+
 @app.on_event('startup')
 async def startup_event():
     global session
@@ -107,10 +115,16 @@ async def verify_token(token: Annotated[str, Depends(oauth2_scheme)] = None):
 @app.get('/fields/{field_name}')
 async def field(field_name: str | None = None,
                 session_id: Annotated[str, Depends(oauth2_scheme)] = None):
-    soql_component = fields[field_name]
-    sf = API(session_id=session_id)
-    data = await sf.query_field(soql_component['object'], soql_component['field'], soql_component['conditions'], session)
-    data = data.to_dict('list')
+    if cache_field['n_' + field_name] % 100 == 0:
+        soql_component = fields[field_name]
+        sf = API(session_id=session_id)
+        data = await sf.query_field(soql_component['object'], soql_component['field'], soql_component['conditions'], session)
+        data = data.to_dict('list')
+        cache_field[field_name] = data
+    else:
+        data = cache_field[field_name]
+    cache_field['n_' + field_name] = cache_field['n_' + field_name] + 1
+
     return data
 
 
@@ -124,7 +138,7 @@ async def eumir(start_date_of_event: date,
                 result_code: Annotated[list[str] | None, Query()] = None,
                 conclusion_code: Annotated[list[str] | None, Query()] = None,
                 country_name: Annotated[list[str] | None, Query()] = None,
-                complaint_code: Annotated[str | None, Query(pattern='CN-\d\d\d\d\d\d$')] = None,
+                complaint_code: Annotated[str | None, Query(pattern='(CN|Cn|nC|cn)-\d\d\d\d\d\d$')] = None,
                 session_id: Annotated[str, Depends(oauth2_scheme)] = None):
 
     object = 'CMPL123CME__Complaint__c A'
