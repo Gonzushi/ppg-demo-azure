@@ -115,9 +115,9 @@ async def field(field_name: str | None = None,
 
 
 @app.get('/eumir/')
-async def eumir(start_date_of_event: date | None = None,
-                end_date_of_event: date| None = None,
-                product_segment: Annotated[list[str] | None, Query()] = None,
+async def eumir(start_date_of_event: date,
+                end_date_of_event: date,
+                product_segment: Annotated[list[str], Query()],
                 rdc_code: Annotated[list[str] | None, Query()] = None,
                 rdc_clarifier: Annotated[list[str] | None, Query()] = None,
                 pc_code: Annotated[list[str] | None, Query()] = None,
@@ -174,20 +174,26 @@ async def eumir(start_date_of_event: date | None = None,
         df.drop(columns="attributes", inplace=True)
         if child_filter_count > 2: df.drop(columns="Patient_Codes__r", inplace=True)
 
-    df_summary_table = pd.DataFrame()
-    year_list = sorted(df['Date_of_Event__c'].str[:4].value_counts().index.to_list(), reverse=True)
-    for year in year_list:
-        df_complaint_year = df['Date_of_Event__c'].str[0:4] == year
-        if country_name: df_summary_table.loc['Selected Country', year] = [country in country_name for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
-        df_summary_table.loc['EEA', year] = [country in EEA_country for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
-        df_summary_table.loc['World', year] = df_complaint_year.value_counts()[True]
-    df_summary_table = df_summary_table.astype(int)
+    if len(df) > 0:
+        df_summary_table = pd.DataFrame()
+        year_list = sorted(df['Date_of_Event__c'].str[:4].value_counts().index.to_list(), reverse=True)
+        for year in year_list:
+            df_complaint_year = df['Date_of_Event__c'].str[0:4] == year
+            if country_name: df_summary_table.loc['Selected Country', year] = [country in country_name for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
+            df_summary_table.loc['EEA', year] = [country in EEA_country for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
+            df_summary_table.loc['World', year] = df_complaint_year.value_counts()[True]
+        df_summary_table = df_summary_table.astype(int)
+
+        summary_table = df_summary_table.rename_axis('#').reset_index().to_dict('records')
+        summary_per_country = pd.DataFrame(df['Reportable_Country__c'].value_counts()).reset_index().to_dict('records')
+    else:
+        summary_table = []
+        summary_per_country = []
 
 
-    summary_table = df_summary_table.rename_axis('#').reset_index().to_dict('records')
-    summary_per_country = pd.DataFrame(df['Reportable_Country__c'].value_counts()).reset_index().to_dict('records')
-    df = df[[country in country_name for country in df['Reportable_Country__c']]].reset_index(drop=True) if country_name else df
+    df = df[[country in country_name for country in df['Reportable_Country__c']]].reset_index(drop=True) if country_name and len(df) > 0 else df
     data = df.to_dict('records')
+
     response = {'data': data, 'summary_per_country': summary_per_country, 'summary_table': summary_table}
 
     return response
