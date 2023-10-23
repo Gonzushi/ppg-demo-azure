@@ -58,16 +58,21 @@ fields = {'product_segment': {'object': 'Product_Segment__c',
                              'conditions': ["CMPL123CME__Type__c IN ('EVAL CONCLUSION CODE')"]},
           'country': {'object': 'Country__c',
                       'field': 'Country_Name__c',
-                      'conditions': []}
+                      'conditions': []},
+          'ears_product_family': {'object': 'CMPL123__Product__c',
+                                  'field': 'EARS_Product_Family__c',
+                                  'conditions': []},
          }
 
 cache_field = {'n_product_segment': 0,
+               'n_ears_product_family': 0,
                'n_rdc_code': 0,
                'n_rdc_clarifier': 0,
                'n_pc_code': 0,
                'n_result_code': 0,
                'n_conclusion_code': 0,
                'n_country': 0}
+
 
 @app.on_event('startup')
 async def startup_event():
@@ -97,6 +102,7 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
     response.set_cookie(key='session_id', value=sf.session_id)
     response.set_cookie(key='display_name', value=display_name)
     return response
+
 
 @app.post('/verify_token')
 async def verify_token(token: Annotated[str, Depends(oauth2_scheme)] = None):
@@ -129,16 +135,21 @@ async def field(field_name: str | None = None,
 
 
 @app.get('/eumir/')
-async def eumir(start_date_of_event: date,
-                end_date_of_event: date,
-                product_segment: Annotated[list[str], Query()],
+async def eumir(start_date_of_event: date | None = None,
+                end_date_of_event: date | None = None,
+                product_segment: Annotated[list[str] | None, Query()] = None,
                 rdc_code: Annotated[list[str] | None, Query()] = None,
                 rdc_clarifier: Annotated[list[str] | None, Query()] = None,
                 pc_code: Annotated[list[str] | None, Query()] = None,
+                pc_severity: Annotated[list[str] | None, Query()] = None,
                 result_code: Annotated[list[str] | None, Query()] = None,
                 conclusion_code: Annotated[list[str] | None, Query()] = None,
                 country_name: Annotated[list[str] | None, Query()] = None,
-                complaint_code: Annotated[str | None, Query(pattern='(CN|Cn|nC|cn)-\d\d\d\d\d\d$')] = None,
+                complaint_code: Annotated[str | None, Query(pattern='(CN|Cn|cN|cn)-\d\d\d\d\d\d$')] = None,
+                record_type: Annotated[str | None, Query()] = None,
+                ears_product_family: Annotated[list[str] | None, Query()] = None,
+                complaint_flag: Annotated[str | None, Query()] = None,
+                reportable_flag: Annotated[str | None, Query()] = None,
                 session_id: Annotated[str, Depends(oauth2_scheme)] = None):
 
     object = 'CMPL123CME__Complaint__c A'
@@ -146,22 +157,43 @@ async def eumir(start_date_of_event: date,
                    'A.Name', 
                    'A.Product_Segment__c', 
                    'A.Date_of_Event__c', 
-                   'A.Reportable_Country__c',]
+                   'A.Reportable_Country__c',
+                   'A.CMPL123CME__CMPL123_WF_Status__c',]
     conditions = []
     if start_date_of_event: conditions.append('Date_of_Event__c >= {0}'.format(start_date_of_event))
     if end_date_of_event: conditions.append('Date_of_Event__c < {0}'.format(end_date_of_event))
     if product_segment: conditions.append("Product_Segment__c IN ('{0}')".format("', '".join(product_segment)))
+    if ears_product_family: conditions.append("CMPL123CME__Product__r.EARS_Product_Family__c IN ('{0}')".format("', '".join(ears_product_family)))
     if complaint_code: conditions.append("Name NOT IN ('{0}')".format(complaint_code))
+
+    if record_type:
+        if record_type == 'Literature Search': conditions.append("Procedure__r.RecordTypeId IN ('0121R000001I5QYQA0')")
+        if record_type == 'Trended': conditions.append("Procedure__r.RecordTypeId NOT IN ('0121R000001I5QYQA0')")
+
+    if complaint_flag:
+        if complaint_flag == 'No': 
+            conditions.append("CMPL123CME__CMPL123_WF_Status__c IN ('Closed - No Complaint')")
+            conditions.append("CMPL123CME__CMPL123_WF_Status__c NOT IN ('Closed - Void', 'Closed - Duplicate')")
+        if complaint_flag == 'Yes': conditions.append("CMPL123CME__CMPL123_WF_Status__c NOT IN ('Closed - Void', 'Closed - Duplicate', 'Closed - No Complaint')")
+    
+    if complaint_flag == None: conditions.append("CMPL123CME__CMPL123_WF_Status__c NOT IN ('Closed - Void', 'Closed - Duplicate')")
+
+    if reportable_flag:
+        if reportable_flag == 'Yes': conditions.append("At_least_one_Reportable_is_not_CC__c IN ('Y')")
+        if reportable_flag == 'No': conditions.append("At_least_one_Reportable_is_not_CC__c IN ('N')")
 
     child_filter_count = 0
     if rdc_code or rdc_clarifier: child_filter_count += 1
     if pc_code: child_filter_count += 1
     if result_code or conclusion_code: child_filter_count += 1
 
+    temp_cond = []
+    if pc_code: temp_cond.append("Code__c IN ('{0}')".format("', '".join(pc_code)))
+    if pc_severity: temp_cond.append("Severity__c IN ({0})".format(", ".join(pc_severity)))
     if child_filter_count <= 2:
-        if pc_code: conditions.append("Id IN (SELECT Related_Complaint__c FROM Patient_Code__c WHERE Code__c IN ('{0}'))".format("', '".join(pc_code)))
+        if temp_cond: conditions.append("Id IN (SELECT Related_Complaint__c FROM Patient_Code__c WHERE {0})".format(' AND '.join(temp_cond)))
     else:
-        if pc_code: select_list.append("(SELECT Related_Complaint__c FROM Patient_Codes__r WHERE Code__c IN ('{0}'))".format("', '".join(pc_code)))
+        if temp_cond: select_list.append("(SELECT Related_Complaint__c FROM Patient_Codes__r WHERE {0})".format(' AND '.join(temp_cond)))
 
     temp_cond = []
     if rdc_code: temp_cond.append("Code__c IN ('{0}')".format("', '".join(rdc_code)))
