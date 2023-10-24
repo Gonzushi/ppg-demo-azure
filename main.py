@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from typing import Annotated
 from sf_api import API, Login
 
+import query_priority_list
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 app = FastAPI()
@@ -245,6 +247,10 @@ async def eumir(start_date_of_event: date | None = None,
     return response
 
 
-
-
-
+@app.get('/priority_list/{type}')
+async def eumir(type: str,
+                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+    sf = API(session_id=session_id)
+    df = query_priority_list.query(sf, option=type)
+    response = df.to_dict('records')
+    return response
