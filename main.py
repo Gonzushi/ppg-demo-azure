@@ -223,14 +223,30 @@ async def eumir(start_date_of_event: date | None = None,
         df.drop(columns="attributes", inplace=True)
         if child_filter_count > 2: df.drop(columns="Patient_Codes__r", inplace=True)
 
+    year_list = [year for year in range(int(start_date_of_event.year), int(end_date_of_event.year)+1)]
+    year_list.sort()
+    year_list.reverse()
+
+    print(country_name)
     if len(df) > 0:
-        df_summary_table = pd.DataFrame()
-        year_list = sorted(df['Date_of_Event__c'].str[:4].value_counts().index.to_list(), reverse=True)
+        df['Year'] = df['Date_of_Event__c'].str[0:4]
+        df['EEA'] = df['Reportable_Country__c'].map(lambda row: 'Yes' if row in EEA_country else 'No')
+        if country_name:
+            df['Selected'] = df['Reportable_Country__c'].map(lambda row: 'Yes' if row in country_name else 'No')
+            
+        df_summary_table = pd.DataFrame()  
         for year in year_list:
-            df_complaint_year = df['Date_of_Event__c'].str[0:4] == year
-            if country_name: df_summary_table.loc['Selected Country', year] = [country in country_name for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
-            df_summary_table.loc['EEA', year] = [country in EEA_country for country in df[df_complaint_year]['Reportable_Country__c']].count(True)
-            df_summary_table.loc['World', year] = df_complaint_year.value_counts()[True]
+            year = str(year)
+            if country_name:
+                df_summary_table.loc['Selected Country', year] = len(df[(df['Selected'] == 'Yes') & (df['Year'] == year)])
+            df_summary_table.loc['EEA', year] = len(df[(df['EEA'] == 'Yes') & (df['Year'] == year)])
+            df_summary_table.loc['World', year] = len(df[(df['Year'] == year)])
+
+        if country_name:
+            df = df.drop(columns=['EEA', 'Year', 'Selected'])
+        else:
+            df = df.drop(columns=['EEA', 'Year'])
+
         df_summary_table = df_summary_table.astype(int)
 
         summary_table = df_summary_table.rename_axis('#').reset_index().to_dict('records')
