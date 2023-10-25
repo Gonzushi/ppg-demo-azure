@@ -1,5 +1,6 @@
 import aiohttp
 import pandas as pd
+import asyncio
 
 from datetime import date
 from fastapi import Cookie, FastAPI, Query, Depends, HTTPException, status
@@ -254,3 +255,117 @@ async def eumir(type: str,
     df = query_priority_list.query(sf, option=type)
     response = df.to_dict('records')
     return response
+
+@app.get('/article/')
+async def eumir(start_date_of_event: date | None = None,
+                end_date_of_event: date | None = None,
+                product_segment: Annotated[list[str] | None, Query()] = None,
+                rdc_code: Annotated[list[str] | None, Query()] = None,
+                pc_code: Annotated[list[str] | None, Query()] = None,
+                country_name: Annotated[list[str] | None, Query()] = None,
+                complaint_code: Annotated[str | None, Query(pattern='(CN|Cn|cN|cn)-\d\d\d\d\d\d$')] = None,
+                record_type: Annotated[str | None, Query()] = None,
+                ears_product_family: Annotated[list[str] | None, Query()] = None,
+                complaint_flag: Annotated[str | None, Query()] = None,
+                reportable_flag: Annotated[str | None, Query()] = None,
+                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+
+    object = 'CMPL123CME__Complaint__c A'
+    select_list = ['A.Id', 
+                   'A.Name', 
+                   'A.Product_Segment__c', 
+                   'A.Date_of_Event__c', 
+                   'A.Reportable_Country__c',
+                   'A.CMPL123CME__CMPL123_WF_Status__c',]
+    conditions = []
+    if start_date_of_event: conditions.append('Date_of_Event__c >= {0}'.format(start_date_of_event))
+    if end_date_of_event: conditions.append('Date_of_Event__c < {0}'.format(end_date_of_event))
+    if product_segment: conditions.append("Product_Segment__c IN ('{0}')".format("', '".join(product_segment)))
+    if ears_product_family: conditions.append("CMPL123CME__Product__r.EARS_Product_Family__c IN ('{0}')".format("', '".join(ears_product_family)))
+    if complaint_code: conditions.append("Name NOT IN ('{0}')".format(complaint_code))
+
+    if record_type:
+        if record_type == 'Literature Search': conditions.append("Procedure__r.RecordTypeId IN ('0121R000001I5QYQA0')")
+        if record_type == 'Trended': conditions.append("Procedure__r.RecordTypeId NOT IN ('0121R000001I5QYQA0')")
+
+    if complaint_flag:
+        if complaint_flag == 'No': 
+            conditions.append("CMPL123CME__CMPL123_WF_Status__c IN ('Closed - No Complaint')")
+            conditions.append("CMPL123CME__CMPL123_WF_Status__c NOT IN ('Closed - Void', 'Closed - Duplicate')")
+        if complaint_flag == 'Yes': conditions.append("CMPL123CME__CMPL123_WF_Status__c NOT IN ('Closed - Void', 'Closed - Duplicate', 'Closed - No Complaint')")
+    
+    if complaint_flag == None: conditions.append("CMPL123CME__CMPL123_WF_Status__c NOT IN ('Closed - Void', 'Closed - Duplicate')")
+
+    if reportable_flag:
+        if reportable_flag == 'Yes': conditions.append("At_least_one_Reportable_is_not_CC__c IN ('Y')")
+        if reportable_flag == 'No': conditions.append("At_least_one_Reportable_is_not_CC__c IN ('N')")
+
+
+    sf = API(session_id=session_id)
+    select_statement = ', '.join(select_list)
+    year_list = [year for year in range(int(start_date_of_event.year), int(end_date_of_event.year)+1)]
+    year_list.sort()
+    year_list.reverse()
+        
+    async def query_code(rdc, object_code, code_type):
+        conditions_code = conditions.copy()
+        conditions_code.append("Id IN (SELECT Related_Complaint__c FROM {0} WHERE Code__c IN ('{1}'))".format(object_code, rdc))
+        conditions_statement_code = 'WHERE ' + ' AND '.join(conditions_code) if conditions_code else ''
+        soql_code = 'SELECT {0} FROM {1} {2}'.format(select_statement, object, conditions_statement_code)
+        soql_code = soql_code.strip()
+        soql_code = soql_code.replace(' ', '+')
+        raw_data_code = await sf.query_soql(soql_code, session)
+        df_code = pd.DataFrame(raw_data_code)
+        if len(df_code) != 0: 
+            df_code.reset_index(drop=True, inplace=True)
+            df_code.drop(columns="attributes", inplace=True)
+            df_code['Year'] = df_code['Date_of_Event__c'].str[0:4].astype(int)
+            df_code['EEA'] = df_code['Reportable_Country__c'].map(lambda row: 'Yes' if row in EEA_country else 'No')
+            if country_name:
+                df_code['Selected'] = df_code['Reportable_Country__c'].map(lambda row: 'Yes' if row in country_name else 'No')
+                
+            df_output = pd.DataFrame()  
+            for year in year_list:
+                df_output.loc[f'{code_type} {rdc}', year] = year
+                if country_name:
+                    df_output.loc['Selected Country', year] = len(df_code[(df_code['Selected'] == 'Yes') & (df_code['Year'] == year)])
+                df_output.loc['EEA', year] = len(df_code[(df_code['EEA'] == 'Yes') & (df_code['Year'] == year)])
+                df_output.loc['World', year] = len(df_code[(df_code['Year'] == year)])
+        else:
+            df_output = pd.DataFrame()  
+            for year in year_list:
+                df_output.loc[f'{code_type} {rdc}', year] = year
+                if country_name:
+                    df_output.loc['Selected Country', year] = 0
+                df_output.loc['EEA', year] = 0
+                df_output.loc['World', year] = 0
+
+        df_output = df_output.astype(int)
+        df_output = df_output.reset_index()
+        return df_output
+
+    if rdc_code:
+        tasks = [query_code(rdc, 'Rdc_Code__c', 'RDC') for rdc in rdc_code]
+        results = await asyncio.gather(*tasks)
+        df_rdc = pd.concat(results)
+        df_rdc.reset_index(drop=True, inplace=True)
+
+    if pc_code:
+        tasks = [query_code(pc, 'Patient_Code__c', 'PC') for pc in pc_code]
+        results = await asyncio.gather(*tasks)
+        df_pc = pd.concat(results)
+        df_pc.reset_index(drop=True, inplace=True)
+
+    if rdc_code and pc_code:
+        df_final = pd.concat([df_rdc, df_pc])
+    elif rdc_code:
+        df_final = df_rdc
+    elif pc_code:
+        df_final = df_pc
+    
+    df_final = df_final.rename(columns={'index': '#'})
+    response = df_final.to_dict('records')
+    
+    return response
+
+

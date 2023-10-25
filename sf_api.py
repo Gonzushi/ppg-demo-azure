@@ -122,7 +122,7 @@ class API(Login):
     async def query_soql(self, SOQL, session=aiohttp.ClientSession()):
         async with session.get(self.instance + self.ext['query'] + '?q=' + SOQL, headers=self.headers) as response:
             data_json = await response.json()
-
+        
         data = data_json['records']
         pages = ceil(data_json['totalSize']/2000)
         
