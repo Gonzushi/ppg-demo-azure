@@ -272,7 +272,7 @@ async def eumir(type: str,
 
 @app.get('/power_bi')
 async def power_bi():
-    sf = API(username='hendry.widyanto@abbott.com', password='Hw8751677!')
+    sf = API(username='hendry.widyanto@abbott.com.echo', password='Hw8751677!')
     df = query_priority_list.query(sf, option='queue')
     response = df.to_dict('records')
     return response
