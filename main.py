@@ -3,7 +3,7 @@ import pandas as pd
 import asyncio
 
 from datetime import date
-from fastapi import Cookie, FastAPI, Query, Depends, HTTPException, status
+from fastapi import Cookie, FastAPI, Query, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -102,8 +102,6 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
 
     content = {"access_token": sf.session_id, "token_type": "bearer", 'display_name': display_name}
     response = JSONResponse(content=content)
-    response.set_cookie(key='session_id', value=sf.session_id)
-    response.set_cookie(key='display_name', value=display_name)
     return response
 
 
@@ -269,6 +267,13 @@ async def eumir(type: str,
                 session_id: Annotated[str, Depends(oauth2_scheme)] = None):
     sf = API(session_id=session_id)
     df = query_priority_list.query(sf, option=type)
+    response = df.to_dict('records')
+    return response
+
+@app.get('/power_bi')
+async def power_bi():
+    sf = API(username='hendry.widyanto@abbott.com', password='Hw8751677!')
+    df = query_priority_list.query(sf, option='queue')
     response = df.to_dict('records')
     return response
 
