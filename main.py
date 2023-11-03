@@ -67,6 +67,10 @@ fields = {'product_segment': {'object': 'Product_Segment__c',
                                   'conditions': []},
          }
 
+multi_fields = {
+    'part_number': 'SELECT Id, Name, Part_Description__c FROM CMPL123__Product__c'
+}
+
 cache_field = {'n_product_segment': 0,
                'n_ears_product_family': 0,
                'n_rdc_code': 0,
@@ -74,7 +78,8 @@ cache_field = {'n_product_segment': 0,
                'n_pc_code': 0,
                'n_result_code': 0,
                'n_conclusion_code': 0,
-               'n_country': 0}
+               'n_country': 0,
+               'n_part_number': 0}
 
 
 @app.on_event('startup')
@@ -127,6 +132,20 @@ async def field(field_name: str | None = None,
         sf = API(session_id=session_id)
         data = await sf.query_field(soql_component['object'], soql_component['field'], soql_component['conditions'], session)
         data = data.to_dict('list')
+        cache_field[field_name] = data
+    else:
+        data = cache_field[field_name]
+    cache_field['n_' + field_name] = cache_field['n_' + field_name] + 1
+
+    return data
+
+
+@app.get('/multi_fields/{field_name}')
+async def multi_field(field_name: str | None = None,
+                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+    if cache_field['n_' + field_name] % 100 == 0:
+        sf = API(session_id=session_id)
+        data = await sf.query_soql(multi_fields[field_name], session)
         cache_field[field_name] = data
     else:
         data = cache_field[field_name]
@@ -270,10 +289,10 @@ async def eumir(type: str,
     response = df.to_dict('records')
     return response
 
-@app.get('/power_bi')
-async def power_bi():
+@app.get('/priority_list')
+async def priority_list():
     sf = API(username='hendry.widyanto@abbott.com.echo', password='Hw8751677!')
-    df = query_priority_list.query(sf, option='queue')
+    df = query_priority_list.query(sf, option='all')
     response = df.to_dict('records')
     return response
 
