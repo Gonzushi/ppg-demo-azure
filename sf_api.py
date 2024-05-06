@@ -7,7 +7,7 @@ from collections import OrderedDict
 from math import ceil
 
 class Login():
-    def __init__(self, username='', password='', session_id=''):
+    def __init__(self, username='hendry.widyanto@abbott.com.echo', password='Hw8751677!', session_id=''):
         self.api_version = 'v58.0'
         self.instance = 'https://abbottecho.my.salesforce.com'
         self.endpoint = self.instance + f'/services/data/{self.api_version}/'
@@ -78,7 +78,7 @@ class Login():
     
 
 class API(Login):
-    def __init__(self, username='', password='', session_id=''):
+    def __init__(self, username='hendry.widyanto@abbott.com.echo', password='Hw8751677!', session_id=''):
         super().__init__(username, password, session_id)
         self.headers = {'Authorization': 'Bearer ' + self.session_id}
         if self.login_succesful: self.ext = OrderedDict(sorted(self._get_ext().items()))

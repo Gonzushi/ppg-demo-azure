@@ -98,38 +98,11 @@ async def home():
     return {'message': 'Hello Hendry!'}
 
 
-@app.post('/token')
-async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
-    sf = API(username=form_data.username, password=form_data.password)
-    if not sf.login_succesful:
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-    display_name = sf.identity()['display_name']
-
-    content = {"access_token": sf.session_id, "token_type": "bearer", 'display_name': display_name}
-    response = JSONResponse(content=content)
-    return response
-
-
-@app.post('/verify_token')
-async def verify_token(token: Annotated[str, Depends(oauth2_scheme)] = None):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Your sessions has timed out. Please log in again.",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    sf = Login(session_id=token)
-    sf.check_session_id()
-    if not sf.login_succesful: raise credentials_exception
-    return {'detail': 'Session ID is valid'}
-
-
 @app.get('/fields/{field_name}')
-async def field(field_name: str | None = None,
-                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+async def field(field_name: str | None = None):
     if cache_field['n_' + field_name] % 100 == 0:
         soql_component = fields[field_name]
-        sf = API(session_id=session_id)
+        sf = API()
         data = await sf.query_field(soql_component['object'], soql_component['field'], soql_component['conditions'], session)
         data = data.to_dict('list')
         cache_field[field_name] = data
@@ -141,10 +114,9 @@ async def field(field_name: str | None = None,
 
 
 @app.get('/multi_fields/{field_name}')
-async def multi_field(field_name: str | None = None,
-                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+async def multi_field(field_name: str | None = None):
     if cache_field['n_' + field_name] % 100 == 0:
-        sf = API(session_id=session_id)
+        sf = API()
         data = await sf.query_soql(multi_fields[field_name], session)
         cache_field[field_name] = data
     else:
@@ -169,8 +141,7 @@ async def eumir(start_date_of_event: date | None = None,
                 record_type: Annotated[str | None, Query()] = None,
                 ears_product_family: Annotated[list[str] | None, Query()] = None,
                 complaint_flag: Annotated[str | None, Query()] = None,
-                reportable_flag: Annotated[str | None, Query()] = None,
-                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+                reportable_flag: Annotated[str | None, Query()] = None):
 
     object = 'CMPL123CME__Complaint__c A'
     select_list = ['A.Id', 
@@ -231,7 +202,7 @@ async def eumir(start_date_of_event: date | None = None,
     soql = soql.strip()
     soql = soql.replace(' ', '+')
 
-    sf = API(session_id=session_id)
+    sf = API()
     raw_data = await sf.query_soql(soql, session)
     df = pd.DataFrame(raw_data)
     df = df.dropna()
@@ -282,16 +253,15 @@ async def eumir(start_date_of_event: date | None = None,
 
 
 @app.get('/priority_list/{type}')
-async def eumir(type: str,
-                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
-    sf = API(session_id=session_id)
+async def eumir(type: str,):
+    sf = API()
     df = query_priority_list.query(sf, option=type)
     response = df.to_dict('records')
     return response
 
 @app.get('/priority_list')
 async def priority_list():
-    sf = API(username='hendry.widyanto@abbott.com.echo', password='Hw8751677!')
+    sf = API()
     df = query_priority_list.query(sf, option='all')
     response = df.to_dict('records')
     return response
@@ -307,8 +277,7 @@ async def eumir(start_date_of_event: date | None = None,
                 record_type: Annotated[str | None, Query()] = None,
                 ears_product_family: Annotated[list[str] | None, Query()] = None,
                 complaint_flag: Annotated[str | None, Query()] = None,
-                reportable_flag: Annotated[str | None, Query()] = None,
-                session_id: Annotated[str, Depends(oauth2_scheme)] = None):
+                reportable_flag: Annotated[str | None, Query()] = None):
 
     object = 'CMPL123CME__Complaint__c A'
     select_list = ['A.Id', 
@@ -341,7 +310,7 @@ async def eumir(start_date_of_event: date | None = None,
         if reportable_flag == 'No': conditions.append("At_least_one_Reportable_is_not_CC__c IN ('N')")
 
 
-    sf = API(session_id=session_id)
+    sf = API()
     select_statement = ', '.join(select_list)
     year_list = [year for year in range(int(start_date_of_event.year), int(end_date_of_event.year)+1)]
     year_list.sort()
